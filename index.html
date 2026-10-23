@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>27granos | Panel de pedidos</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#150f0c">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Pedidos 27g">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" href="img/icon-192.png">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1>Panel de pedidos</h1>
+    <p class="sub">Pega el mensaje del cliente. Los precios se toman de tu lista, no del mensaje.</p>
+  </header>
+
+  <section class="card" aria-labelledby="t1">
+    <h2 id="t1">Mensaje del cliente</h2>
+    <textarea id="msg" aria-label="Mensaje de WhatsApp del cliente"></textarea>
+    <div class="row">
+      <button id="go">Calcular total</button>
+      <button class="ghost" id="clear">Limpiar</button>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="t2" aria-live="polite">
+    <h2 id="t2">Resumen del pedido</h2>
+    <div id="out"></div>
+  </section>
+
+  <section class="card" aria-labelledby="t3">
+    <h2 id="t3">Respuesta para el cliente</h2>
+    <textarea id="reply" aria-label="Respuesta para el cliente"></textarea>
+    <div class="row">
+      <button id="copy">Copiar respuesta</button>
+      <span class="sub" id="copied" role="status"></span>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="t4">
+    <h2 id="t4">Lista de precios</h2>
+    <p class="sub" style="margin-bottom:.8rem">Se guarda en este navegador. Debe coincidir con los nombres del catálogo de la página.</p>
+    <div id="list"></div>
+    <div class="add">
+      <input id="newName" placeholder="Producto" aria-label="Nombre del producto">
+      <input id="newPrice" type="number" min="0" step="0.5" placeholder="Precio" aria-label="Precio">
+      <button id="addBtn">Agregar</button>
+    </div>
+  </section>
+</main>
+
+<script>
+const KEY = "27granos-precios";
+const DEF = [["Espresso simple",45],["Flat white",65],["V60 de lote único",75],["Chemex, 2 tazas",140],["Croissant de almendras",68],["Brownie de cacao",55],["Etiopía Yirgacheffe 250 g",245],["Colombia Huila 250 g",220],["Etiopía Guji 250 g",250],["Guatemala Antigua 250 g",210]];
+const $ = s => document.querySelector(s);
+const fmt = n => new Intl.NumberFormat("es-MX", { style:"currency", currency:"MXN" }).format(n);
+const norm = s => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+const esc = s => s.replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+
+let prices = null;
+try { prices = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
+if (!Array.isArray(prices)) prices = DEF.map(([n, p]) => ({ n, p }));
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(prices)); } catch (e) {} };
+
+function calc() {
+  const rows = [], bad = [];
+  $("#msg").value.split("\n").forEach(line => {
+    const m = line.match(/^\s*[•·\-*]?\s*(\d+)\s*[xX×]\s*(.+?)\s*(?:[—–-]\s*\$[\d.,]+)?\s*$/);
+    if (!m) return;
+    const q = +m[1], k = norm(m[2]);
+    const p = prices.find(x => norm(x.n) === k) ||
+              (k.length > 2 && prices.find(x => norm(x.n).includes(k) || k.includes(norm(x.n))));
+    if (p) rows.push({ q, n: p.n, u: +p.p || 0 }); else bad.push(m[2]);
+  });
+  const total = rows.reduce((s, r) => s + r.q * r.u, 0);
+  let html = "";
+  if (rows.length) {
+    html = `<div class="tablewrap"><table><thead><tr><th>Cant.</th><th>Producto</th><th class="r">Precio</th><th class="r">Subtotal</th></tr></thead><tbody>` +
+      rows.map(r => `<tr><td>${r.q}</td><td>${esc(r.n)}</td><td class="r">${fmt(r.u)}</td><td class="r">${fmt(r.q * r.u)}</td></tr>`).join("") +
+      `</tbody></table></div><div class="total"><span>Total</span><strong>${fmt(total)}</strong></div>`;
+  } else html = `<p class="empty">No encontré productos. Revisa que el mensaje tenga líneas como "2 x Espresso simple".</p>`;
+  if (bad.length) html += `<div class="alert">No están en tu lista, no se sumaron: ${bad.map(esc).join(", ")}. Agrégalos abajo o revisa el nombre.</div>`;
+  $("#out").innerHTML = html;
+  $("#reply").value = rows.length
+    ? `Hola 👋, gracias por tu pedido en 27granos:\n\n${rows.map(r => `• ${r.q} x ${r.n} — ${fmt(r.q * r.u)}`).join("\n")}\n\n*Total: ${fmt(total)}*\n\n¿Lo confirmamos para prepararlo?`
+    : "";
+}
+
+function renderList() {
+  $("#list").innerHTML = prices.map((p, i) => `
+    <div class="price-row">
+      <input value="${esc(p.n)}" data-i="${i}" data-f="n" aria-label="Producto">
+      <input type="number" min="0" step="0.5" value="${p.p}" data-i="${i}" data-f="p" aria-label="Precio">
+      <button data-del="${i}" aria-label="Eliminar ${esc(p.n)}">✕</button>
+    </div>`).join("");
+}
+
+$("#list").addEventListener("input", e => {
+  const i = e.target.dataset.i; if (i === undefined) return;
+  prices[i][e.target.dataset.f] = e.target.dataset.f === "p" ? +e.target.value : e.target.value;
+  save(); calc();
+});
+$("#list").addEventListener("click", e => {
+  const d = e.target.closest("[data-del]"); if (!d) return;
+  prices.splice(+d.dataset.del, 1); save(); renderList(); calc();
+});
+$("#addBtn").onclick = () => {
+  const n = $("#newName").value.trim(), p = +$("#newPrice").value;
+  if (!n || !(p >= 0) || $("#newPrice").value === "") return;
+  prices.push({ n, p }); save(); renderList(); calc();
+  $("#newName").value = $("#newPrice").value = "";
+};
+$("#go").onclick = calc;
+$("#clear").onclick = () => { $("#msg").value = ""; calc(); $("#msg").focus(); };
+$("#copy").onclick = () => {
+  const r = $("#reply"); r.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (e) {}
+  $("#copied").textContent = ok ? "Copiado" : "Selecciona el texto y cópialo";
+  setTimeout(() => $("#copied").textContent = "", 2500);
+};
+
+renderList();
+calc();
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
